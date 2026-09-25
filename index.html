@@ -19,11 +19,11 @@
 </head>
 <body>
 <canvas id="game" tabindex="0"></canvas>
-<div class="help">矢印キー：移動 ／ Enter・Z：決定 ／ Esc・X：もどる ／ I：どうぐ ／ S：セーブ</div>
+<div class="help">↑↓：前進・後退 ／ ←→：向きを変える ／ Enter・Z：決定 ／ Esc・X：もどる ／ M：マップ ／ I：どうぐ ／ S：セーブ</div>
 <script>
 'use strict';
 // =====================================================================
-//  紫晶の迷宮 — Vanilla JS + Canvas のアイソメトリック・ダンジョンRPG
+//  紫晶の迷宮 — Vanilla JS + Canvas の一人称3Dダンジョン RPG
 // =====================================================================
 const LW = 480, LH = 320, S = 2;          // 論理解像度 × 2 倍で描画
 const cv = document.getElementById('game');
@@ -279,79 +279,77 @@ const SPELLS = [
 const learned = () => SPELLS.filter(s => s.lv <= player.lv);
 
 // =====================================================================
-//  アイソメトリック・タイル生成（ピクセル単位でくっきり描く）
+//  一人称3D用テクスチャ（32×32 のドット絵をコードで生成）
 // =====================================================================
-const TW = 32, TH = 16, WALLH = 18, LOWH = 6;
-const colTop = px => 7 - ((px < 16 ? px : 31 - px) >> 1);
-const colBot = px => 8 + ((px < 16 ? px : 31 - px) >> 1);
 function lcg(seed) { let s = seed | 0; return () => { s = (Math.imul(s, 1103515245) + 12345) | 0; return ((s >>> 8) & 0xffff) / 65536; }; }
-// タイル内のアイソ座標 (a: x軸方向, b: y軸方向) 0..1
-function isoAB(px, py) { const dx = px + .5 - 16, dy = py + .5; return [(dx / 16 + dy / 8) / 2, (dy / 8 - dx / 16) / 2]; }
-
-function makeFloor(seed, seam) {
-  const c = mk(TW, TH), g = c.getContext('2d'), rnd = lcg(seed);
-  for (let px = 0; px < TW; px++) {
-    const t = colTop(px), b = colBot(px);
-    for (let py = t; py <= b; py++) {
-      let col;
-      const r = rnd();
-      col = r < .5 ? '#3a2a58' : r < .8 ? '#352550' : r < .95 ? '#402f60' : '#4a3870';
-      const [A, B] = isoAB(px, py);
-      if (((seam & 1) && Math.abs(A - .5) < .035) || ((seam & 2) && Math.abs(B - .5) < .035)) col = '#2a1d42';
-      if (py === t) col = '#5b4688';
-      else if (py === b) col = '#1e1430';
-      g.fillStyle = col; g.fillRect(px, py, 1, 1);
-    }
-  }
-  return c;
+const TS = 32;
+const rgb = (r, g, b) => (0xff000000 | (clamp(b | 0, 0, 255) << 16) | (clamp(g | 0, 0, 255) << 8) | clamp(r | 0, 0, 255)) >>> 0;
+function makeTex(fn) { const t = new Uint32Array(TS * TS); for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) t[y * TS + x] = fn(x, y); return t; }
+// レンガ（壁・天井）
+function brickTex(seed, base, mortar, bw, bh) {
+  return makeTex((x, y) => {
+    const row = Math.floor(y / bh), off = (row % 2) * (bw >> 1);
+    const lx = (x + off) % bw, ly = y % bh, bx = Math.floor(((x + off) % TS) / bw);
+    if (ly === bh - 1 || lx === bw - 1) return rgb(...mortar);
+    let k = .82 + (hash(row * 7 + bx, seed) % 28) / 100;
+    if (ly === 0 || lx === 0) k += .2;
+    else if (ly === bh - 2 || lx === bw - 2) k -= .2;
+    k += ((hash(x + seed, y) % 9) - 4) / 60;
+    if (hash(x * 7 + seed, y * 13) % 113 === 0) return rgb(201, 168, 255);   // 紫水晶のきらめき
+    return rgb(base[0] * k, base[1] * k, base[2] * k);
+  });
 }
-function makeStairs() {
-  const c = makeFloor(999, 0), g = c.getContext('2d');
-  const cols = ['#9a84d0', '#6a5498', '#44336c', '#281c40', '#140c22'];
-  for (let px = 0; px < TW; px++) {
-    for (let py = colTop(px) + 1; py < colBot(px); py++) {
-      const [A, B] = isoAB(px, py);
-      if (A < .14 || A > .86 || B < .14 || B > .86) continue;
-      const f = (A - .14) / .72 * 5, i = Math.floor(f);
-      let col = cols[clamp(i, 0, 4)];
-      if (f - i < .2 && i < 4) col = '#c9b4f0';
-      g.fillStyle = col; g.fillRect(px, py, 1, 1);
-    }
-  }
-  return c;
+// 石畳（床）
+function floorTex(seed) {
+  return makeTex((x, y) => {
+    const row = Math.floor(y / 8), bw = row % 2 ? 8 : 16, off = (row * 5) % 16;
+    const lx = (x + off) % bw, ly = y % 8, bx = Math.floor(((x + off) % TS) / bw);
+    if (ly === 7 || lx === bw - 1) return rgb(20, 12, 34);
+    let k = .8 + (hash(row * 5 + bx, seed) % 30) / 100;
+    if (ly === 0 || lx === 0) k += .22; else if (ly === 6 || lx === bw - 2) k -= .18;
+    k += ((hash(x, y + seed) % 9) - 4) / 60;
+    return rgb(64 * k, 48 * k, 98 * k);
+  });
 }
-function makeWall(h, seed) {
-  const c = mk(TW, TH + h), g = c.getContext('2d'), rnd = lcg(seed);
-  for (let px = 0; px < TW; px++) {
-    const t = colTop(px), b = colBot(px);
-    for (let py = t; py <= b; py++) {           // 上面
-      const r = rnd();
-      let col = r < .6 ? '#6a52a0' : r < .9 ? '#634c96' : '#7560ae';
-      if (py === t) col = '#a38ad8';
-      else if (py === b) col = '#4c3a7a';
-      g.fillStyle = col; g.fillRect(px, py, 1, 1);
-    }
-    const left = px < 16;
-    for (let v = 0; v < h; v++) {               // 側面（レンガ）
-      const py = b + 1 + v;
-      const course = Math.floor(v / 6);
-      const mortar = v % 6 === 5 || (px + (course % 2) * 4) % 8 === 0;
-      let col = left ? (mortar ? '#2c1f47' : '#47346f') : (mortar ? '#211634' : '#33244f');
-      if (!mortar && rnd() < .12) col = left ? '#4d3a78' : '#382856';
-      if (!mortar && rnd() < .012) col = '#b89cff';     // 紫水晶のきらめき
-      if (v === h - 1) col = '#150d22';
-      if (px === 15 || px === 16) col = mortar ? col : (left ? '#55407f' : '#3a2a5a');
-      g.fillStyle = col; g.fillRect(px, py, 1, 1);
-    }
-  }
-  return c;
+// 下り階段
+function stairsTex() {
+  const f = floorTex(5);
+  return makeTex((x, y) => {
+    if (x < 3 || x > 28 || y < 3 || y > 28) return f[y * TS + x];
+    if (x === 3 || x === 28 || y === 3) return rgb(20, 12, 34);
+    const st = Math.floor((y - 4) / 5), ly = (y - 4) % 5, k = 1 - st * .19;
+    return ly === 0 ? rgb(215 * k, 195 * k, 255 * k) : rgb(120 * k, 96 * k, 170 * k);
+  });
 }
-const DARK = [0, .2, .36, .52, .66, .8];
-const levels = src => DARK.map(a => a ? tinted(src, '#07040c', a) : src);
-const floorSpr = [0, 1, 2, 3, 4, 5].map(v => levels(makeFloor(v * 977 + 13, [1, 2, 3, 0, 0, 1][v])));
-const stairSpr = levels(makeStairs());
-const wallSpr = [0, 1, 2].map(v => levels(makeWall(WALLH, v * 31 + 7)));
-const lowSpr = [0, 1, 2].map(v => levels(makeWall(LOWH, v * 57 + 3)));
+// 燭台つきの壁（紫の炎・2コマ）
+function torchTex(frame) {
+  const base = brickTex(11, [88, 66, 140], [34, 22, 56], 16, 8);
+  const fw = [1, 1, 2, 2, 2, 3, 3, 3, 2, 2];
+  return makeTex((x, y) => {
+    const dx = x - 15.5, d = Math.hypot(dx, (y - 13) * 1.2);
+    if (y >= 19 && y <= 21 && x >= 13 && x <= 18) return rgb(30, 20, 40);
+    if (y >= 22 && y <= 25 && x >= 15 && x <= 16) return rgb(30, 20, 40);
+    const fy = y - (frame ? 8 : 9);
+    if (fy >= 0 && fy < 10 && Math.abs(dx) <= fw[fy]) {
+      if (Math.abs(dx) <= fw[fy] - 1.5) return fy > 6 ? rgb(255, 255, 255) : rgb(230, 205, 255);
+      return rgb(150, 90, 230);
+    }
+    const c = base[y * TS + x], g = Math.max(0, 1 - d / 14) * (frame ? .95 : .8);
+    return rgb((c & 255) * (1 + g) + 40 * g, ((c >>> 8) & 255) * (1 + g * .6), ((c >>> 16) & 255) * (1 + g) + 30 * g);
+  });
+}
+const TEX = {
+  wall: [brickTex(3, [88, 66, 140], [34, 22, 56], 16, 8), brickTex(9, [80, 62, 132], [30, 20, 52], 16, 8), brickTex(21, [96, 70, 150], [36, 24, 60], 8, 8)],
+  torch: [torchTex(0), torchTex(1)],
+  floor: floorTex(7),
+  stairs: stairsTex(),
+  ceil: brickTex(17, [46, 34, 74], [18, 12, 30], 16, 16),
+};
+// ビルボード用のスプライト画素
+function spriteData(c) { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height); return { w: c.width, h: c.height, px: new Uint32Array(d.data.buffer) }; }
+const SPRD = {};
+for (const k in ITEM_SPR) SPRD[k] = spriteData(ITEM_SPR[k]);
+SPRD.mark = spriteData(makeSprite(['aaaaaaa', 'abbbbba', ' abbba ', ' abbba ', '  aba  ', '  aba  ', '   a   '], { a: '#b89cff', b: '#f4ecff' }));
 
 // =====================================================================
 //  ダンジョン生成（シレン風：3×3 区画に部屋＋通路）
@@ -430,52 +428,25 @@ function genFloor(d) {
   // 燭台（紫の炎）
   for (const r of real) {
     for (let n = rand(1, 2); n > 0; n--) {
-      if (chance(.5)) { const x = rand(r.x, r.x + r.w - 1), y = r.y - 1; if (m.wall[y * MW + x] === 1) m.torches.push({ x, y, face: 'L' }); }
-      else { const x = r.x - 1, y = rand(r.y, r.y + r.h - 1); if (m.wall[y * MW + x] === 1) m.torches.push({ x, y, face: 'R' }); }
+      if (chance(.5)) { const x = rand(r.x, r.x + r.w - 1), y = r.y - 1; if (!tiles[y * MW + x]) m.torches.push({ x, y }); }
+      else { const x = r.x - 1, y = rand(r.y, r.y + r.h - 1); if (!tiles[y * MW + x]) m.torches.push({ x, y }); }
     }
   }
   return m;
 }
 function finalizeMap(m) {
-  const fl = (x, y) => x >= 0 && y >= 0 && x < m.w && y < m.h && m.tiles[y * m.w + x] > 0;
-  m.vis = new Uint8Array(m.w * m.h);
-  m.wall = new Uint8Array(m.w * m.h);
-  for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
-    if (m.tiles[y * m.w + x]) continue;
-    let near = false;
-    for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1; dx++) if (fl(x + dx, y + dy)) { near = true; break; }
-    if (!near) continue;
-    // 手前側の壁は低くして、奥が見えるように
-    const front = fl(x - 1, y) || fl(x, y - 1) || fl(x - 1, y - 1);
-    m.wall[y * m.w + x] = front ? 2 : 1;
-  }
-  m.torchAt = new Map(m.torches.map(t => [t.y * m.w + t.x, t]));
+  m.torchSet = new Set(m.torches.map(t => t.y * m.w + t.x));
 }
 const walkable = (x, y) => x >= 0 && y >= 0 && x < map.w && y < map.h && map.tiles[y * map.w + x] > 0;
 function roomAt(x, y) {
   return map.rooms.find(r => !r.dummy && x >= r.x - 1 && x <= r.x + r.w && y >= r.y - 1 && y <= r.y + r.h);
 }
+// オートマップ：いる場所のまわりを記録（見えた範囲はレイキャスト中にも記録）
 function updateVision() {
   const m = map, p = player;
-  m.vis.fill(0);
-  const mark = (x, y, l) => {
-    if (x < 0 || y < 0 || x >= m.w || y >= m.h) return;
-    const i = y * m.w + x; m.explored[i] = 1;
-    if (!m.vis[i] || m.vis[i] > l + 1) m.vis[i] = l + 1;
-  };
-  const room = roomAt(p.x, p.y);
-  if (room) {
-    for (let y = room.y - 1; y <= room.y + room.h; y++) for (let x = room.x - 1; x <= room.x + room.w; x++)
-      mark(x, y, Math.min(3, Math.floor(Math.hypot(x - p.x, y - p.y) / 3.2)));
-  }
-  mark(p.x, p.y, 0);
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-    if (!dx && !dy) continue;
-    for (let k = 1; k <= 2; k++) {
-      const x = p.x + dx * k, y = p.y + dy * k;
-      mark(x, y, k - 1);
-      if (!walkable(x, y)) break;
-    }
+    const x = p.x + dx, y = p.y + dy;
+    if (x >= 0 && y >= 0 && x < m.w && y < m.h) m.explored[y * m.w + x] = 1;
   }
 }
 
@@ -488,12 +459,11 @@ let player = null, map = null, depth = 1, battle = null;
 let busy = false;
 let log = [];
 let T = 0;
-let cam = { x: 0, y: 0 };
 let fadeA = 0, fadeTarget = 0;
 let parts = [], nums = [];
 let shake = 0, flashT = -9999, flashCol = '#fff', lvupT = -9999, goT = 0;
 let titleCursor = 0, lastCmd = 0;
-let dirStack = [], pointer = { down: false, x: 0, y: 0, field: false };
+let dirStack = [], pointer = { down: false, x: 0, y: 0, field: false, act: -1, touch: false }, pendingTurn = -1;
 let hits = [];
 const titleMap = genFloor(1);
 titleMap.explored.fill(1);
@@ -501,7 +471,7 @@ map = titleMap;
 
 function newPlayer() {
   return { name: 'ユウ', lv: 1, hp: 30, mhp: 30, mp: 10, mmp: 10, atk: 8, def: 3, exp: 0, next: 12, gold: 0,
-    items: { herb: 2, water: 1 }, x: 0, y: 0, rx: 0, ry: 0, dir: 1, steps: 0, encStep: 0, safe: 3, moving: null };
+    items: { herb: 2, water: 1 }, x: 0, y: 0, rx: 0, ry: 0, dir: 1, ang: 0, steps: 0, encStep: 0, safe: 3, moving: null, turning: null, bumpT: -9999 };
 }
 
 // ---------- メッセージ ----------
@@ -521,7 +491,7 @@ async function fadeTo(v) { fadeTarget = v; await wait(320, false); }
 function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
 function saveGame(silent) {
   try {
-    const p = Object.assign({}, player, { moving: null });
+    const p = Object.assign({}, player, { moving: null, turning: null });
     const data = { v: 1, depth, player: p, map: {
       tiles: Array.from(map.tiles), explored: Array.from(map.explored), rooms: map.rooms,
       stairs: map.stairs, start: map.start, items: map.items, torches: map.torches } };
@@ -533,7 +503,8 @@ function saveGame(silent) {
 function loadGame() {
   try {
     const d = JSON.parse(localStorage.getItem(SAVE_KEY));
-    player = Object.assign(newPlayer(), d.player, { moving: null });
+    player = Object.assign(newPlayer(), d.player, { moving: null, turning: null });
+    player.ang = DIRANG[player.dir];
     player.rx = player.x; player.ry = player.y;
     depth = d.depth;
     const m = d.map;
@@ -550,7 +521,9 @@ function loadGame() {
 function enterFloor() {
   map = genFloor(depth);
   player.x = player.rx = map.start.x; player.y = player.ry = map.start.y;
-  player.moving = null; player.safe = 3; player.encStep = 0;
+  player.moving = null; player.turning = null; player.safe = 3; player.encStep = 0;
+  const open = [0, 1, 2, 3].filter(d => walkable(player.x + DIRS[d][0], player.y + DIRS[d][1]));
+  player.dir = open.length ? pick(open) : 1; player.ang = DIRANG[player.dir];
   updateVision();
 }
 async function newGame() {
@@ -560,8 +533,8 @@ async function newGame() {
   enterFloor(); mode = 'field'; overlay = null; battle = null;
   await fadeTo(0);
   note('ここは むらさきに ひかる めいきゅう…');
-  note('やじるしキーで いどう。 かいだんを さがそう！');
-  note('I:どうぐ  S:セーブ');
+  note('↑で すすみ ←→で むきを かえる。');
+  note('かいだんを さがそう！ M:マップ');
   busy = false;
 }
 async function continueGame() {
@@ -589,15 +562,22 @@ async function descend() {
   busy = false;
 }
 
-// ---------- 移動 ----------
-// ↑=y-1(画面右上) →=x+1(画面右下) ↓=y+1(画面左下) ←=x-1(画面左上)
-const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-const MOVE_MS = 140;
-function tryMove(d) {
+// ---------- 移動（一人称：↑前進 ↓後退 ←→向きを変える） ----------
+const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];          // 北・東・南・西
+const DIRANG = [-Math.PI / 2, 0, Math.PI / 2, Math.PI];
+const DIRNAME = ['北', '東', '南', '西'];
+const MOVE_MS = 190, TURN_MS = 170;
+function tryAct(a) {     // 0:前進 1:右を向く 2:後退 3:左を向く
   const p = player;
-  p.dir = d;
+  if (a === 1 || a === 3) {
+    const s = a === 1 ? 1 : -1;
+    p.turning = { from: p.ang, to: p.ang + s * Math.PI / 2, t: 0 };
+    p.dir = (p.dir + s + 4) % 4;
+    return;
+  }
+  const d = a === 0 ? p.dir : (p.dir + 2) % 4;
   const nx = p.x + DIRS[d][0], ny = p.y + DIRS[d][1];
-  if (!walkable(nx, ny)) return;
+  if (!walkable(nx, ny)) { if (a === 0 && T - p.bumpT > 400) p.bumpT = T; return; }
   p.moving = { fx: p.x, fy: p.y, t: 0 };
   p.x = nx; p.y = ny;
   updateVision();
@@ -860,7 +840,7 @@ const isOK = k => k === 'Enter' || k === ' ' || k === 'z' || k === 'Z';
 const isNG = k => k === 'Escape' || k === 'x' || k === 'X' || k === 'Backspace';
 addEventListener('keydown', e => {
   const k = e.key;
-  if (k in KEYDIR || k === ' ') e.preventDefault();
+  if (k in KEYDIR || k === ' ' || k === 'Tab') e.preventDefault();
   if (k in KEYDIR && !e.repeat) { dirStack = dirStack.filter(d => d !== KEYDIR[k]); dirStack.push(KEYDIR[k]); }
   onKey(k, e.repeat);
 });
@@ -886,8 +866,9 @@ function onKey(k, repeat) {
     return;
   }
   if (mode === 'field') {
-    if (player.moving) return;
-    if (k === 'i' || k === 'I') { dirStack = []; overlay = { type: 'items', cursor: 0 }; }
+    if (player.moving || player.turning) return;
+    if (k === 'm' || k === 'M' || k === 'Tab') { dirStack = []; overlay = { type: 'map' }; }
+    else if (k === 'i' || k === 'I') { dirStack = []; overlay = { type: 'items', cursor: 0 }; }
     else if (k === 's' || k === 'S') saveGame(false);
     else if (isOK(k) && map.tiles[player.y * map.w + player.x] === 2) overlay = { type: 'confirm', cursor: 0 };
   }
@@ -899,6 +880,7 @@ function titleSelect(i) {
 }
 function overlayKey(k) {
   const o = overlay;
+  if (o.type === 'map') { if (isOK(k) || isNG(k) || k === 'm' || k === 'M' || k === 'Tab') overlay = null; return; }
   if (o.type === 'confirm') {
     if (k in KEYDIR) o.cursor ^= 1;
     else if (isOK(k)) { if (o.cursor === 0) descend(); else { overlay = null; note('かいだんの うえで Enter で おりられるよ。'); } }
@@ -921,14 +903,18 @@ function hitTest(x, y) { for (let i = hits.length - 1; i >= 0; i--) { const h = 
 cv.addEventListener('pointerdown', e => {
   cv.focus();
   const p = toLogical(e);
-  pointer.x = p.x; pointer.y = p.y; pointer.down = true; pointer.field = false;
+  pointer.x = p.x; pointer.y = p.y; pointer.down = true; pointer.field = false; pointer.touch = e.pointerType === 'touch';
   if (skipWait) { skipWait(); return; }
   if (fadeA > .05) return;
   if (mode === 'gameover') { if (T - goT > 900) toTitle(); return; }
   const h = hitTest(p.x, p.y);
   if (h) { h.fn(); return; }
   if (overlay && overlay.type !== 'confirm') { overlay = null; return; }
-  if (mode === 'field' && !overlay && p.y < 222) { pointer.field = true; try { cv.setPointerCapture(e.pointerId); } catch (_) {} }
+  if (mode === 'field' && !overlay && p.y < 224) {
+    const a = pointerAct();
+    if (a === 1 || a === 3) pendingTurn = a;
+    else { pointer.field = true; try { cv.setPointerCapture(e.pointerId); } catch (_) {} }
+  }
 });
 cv.addEventListener('pointermove', e => {
   const p = toLogical(e); pointer.x = p.x; pointer.y = p.y;
@@ -936,11 +922,11 @@ cv.addEventListener('pointermove', e => {
   if (h && h.hover) h.hover();
 });
 addEventListener('pointerup', () => { pointer.down = false; pointer.field = false; });
-function pointerDir() {
-  const dx = pointer.x - 240, dy = pointer.y - 106;
-  if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return -1;
-  const a = dx / 16 + dy / 8, b = dy / 8 - dx / 16;
-  return Math.abs(a) > Math.abs(b) ? (a > 0 ? 1 : 3) : (b > 0 ? 2 : 0);
+// 画面タップ：左右の端＝向きを変える / 下のほう＝後退 / それ以外＝前進
+function pointerAct() {
+  if (pointer.x < 130) return 3;
+  if (pointer.x > 350) return 1;
+  return pointer.y > 170 ? 2 : 0;
 }
 function hit(x, y, w, h, fn, hover) { hits.push({ x, y, w, h, fn, hover }); }
 
@@ -949,24 +935,28 @@ function hit(x, y, w, h, fn, hover) { hits.push({ x, y, w, h, fn, hover }); }
 // =====================================================================
 function update(dt) {
   fadeA += clamp(fadeTarget - fadeA, -dt / 300, dt / 300);
+  if (player && player.turning) {
+    const tr = player.turning;
+    tr.t += dt;
+    const k = Math.min(1, tr.t / TURN_MS), e = k * k * (3 - 2 * k);
+    player.ang = tr.from + (tr.to - tr.from) * e;
+    if (k >= 1) { player.ang = tr.to; player.turning = null; }
+  }
   if (player && player.moving) {
     const m = player.moving;
     m.t += dt;
-    const k = Math.min(1, m.t / MOVE_MS);
-    player.rx = m.fx + (player.x - m.fx) * k;
-    player.ry = m.fy + (player.y - m.fy) * k;
+    const k = Math.min(1, m.t / MOVE_MS), e = k * k * (3 - 2 * k);
+    player.rx = m.fx + (player.x - m.fx) * e;
+    player.ry = m.fy + (player.y - m.fy) * e;
     if (k >= 1) { player.moving = null; player.rx = player.x; player.ry = player.y; if (mode === 'field') onArrive(); }
   }
-  if (mode === 'field' && !busy && !overlay && !player.moving && fadeA < .05) {
-    let d = dirStack.length ? dirStack[dirStack.length - 1] : -1;
-    if (d < 0 && pointer.down && pointer.field) d = pointerDir();
-    if (d >= 0) tryMove(d);
+  if (mode === 'field' && !busy && !overlay && !player.moving && !player.turning && fadeA < .05) {
+    let a = dirStack.length ? dirStack[dirStack.length - 1] : -1;
+    if (a < 0 && pendingTurn >= 0) a = pendingTurn;
+    if (a < 0 && pointer.down && pointer.field) { a = pointerAct(); if (a === 1 || a === 3) a = -1; }
+    pendingTurn = -1;
+    if (a >= 0) tryAct(a);
   }
-  if (mode === 'title') {
-    const r = titleMap.rooms.find(r => !r.dummy && r.cx === 1 && r.cy === 1) || titleMap.rooms[4];
-    cam.x = r.x + r.w / 2 + Math.sin(T / 3000) * 3;
-    cam.y = r.y + r.h / 2 + Math.cos(T / 3700) * 3;
-  } else if (player) { cam.x = player.rx; cam.y = player.ry; }
 
   for (const p of parts) { p.t += dt; p.x += p.vx * dt / 16; p.y += p.vy * dt / 16; p.vy += p.g * dt / 16; p.vx *= .99; }
   parts = parts.filter(p => p.t < p.life);
@@ -1027,93 +1017,120 @@ function wrap(text, maxW) {
 // =====================================================================
 //  ダンジョン描画
 // =====================================================================
-function drawPlayerAt(psx, psy) {
-  const p = player;
-  isoFill(psx, psy + 1, 7, 2, 'rgba(0,0,0,.45)');
-  const frame = p.moving ? Math.floor(T / 110) % 2 : 0;
-  const bob = p.moving ? -frame : (Math.sin(T / 450) > .6 ? -1 : 0);
-  const set = (p.dir === 0 || p.dir === 3) ? heroBack : heroFront;
-  const flipped = (p.dir === 2 || p.dir === 3) ? 1 : 0;
-  ctx.drawImage(set[flipped][frame], psx - 6, psy - 12 + bob);
+const VW = 240, VH = 112;                     // 3D ビューの内部解像度（ドット感のため低解像度）
+const view = mk(VW, VH), vctx = view.getContext('2d');
+const vimg = vctx.createImageData(VW, VH), vbuf = new Uint32Array(vimg.data.buffer);
+const zbuf = new Float32Array(VW);
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const FOGC = rgb(7, 4, 12);
+const light = d => clamp(1.3 - d / 5.5, 0, 1);
+function shadeC(c, s, x, y) {   // 距離で暗く（ディザで段階的に）
+  s = Math.floor(s * 9 + BAYER[(y & 3) * 4 + (x & 3)] / 16) / 9;
+  if (s >= 1) return c;
+  if (s <= 0) return FOGC;
+  const t = 1 - s;
+  return (0xff000000 | (((((c >>> 16) & 255) * s + 12 * t) | 0) << 16) | (((((c >>> 8) & 255) * s + 4 * t) | 0) << 8) | (((c & 255) * s + 7 * t) | 0)) >>> 0;
 }
-function drawField(title) {
-  const m = map;
-  const ox = 240 - (cam.x - cam.y) * 16, oy = 106 - (cam.x + cam.y) * 8;
-  const pcx = Math.round(cam.x), pcy = Math.round(cam.y), R = 16;
-  const x0 = Math.max(0, pcx - R), x1 = Math.min(m.w - 1, pcx + R);
-  const y0 = Math.max(0, pcy - R), y1 = Math.min(m.h - 1, pcy + R);
-  const itemAt = new Map(m.items.map(it => [it.y * m.w + it.x, it]));
-  let drawTile = -1, psum = -99;
-  if (!title && player) {
-    const mv = player.moving;
-    let tx = player.x, ty = player.y;
-    if (mv && mv.fx + mv.fy > tx + ty) { tx = mv.fx; ty = mv.fy; }
-    drawTile = ty * m.w + tx; psum = player.x + player.y;
+function renderView(px, py, ang, record) {
+  const m = map, W = m.w, H = m.h, half = VH / 2;
+  const dx = Math.cos(ang), dy = Math.sin(ang), FOVK = .78;
+  const plx = -dy * FOVK, ply = dx * FOVK;
+  const tf = Math.floor(T / 170) % 2;
+  // 床と天井
+  const rx0 = dx - plx, ry0 = dy - ply, rx1 = dx + plx, ry1 = dy + ply;
+  for (let y = half; y < VH; y++) {
+    const rowD = half / (y - half + .5);
+    const sx = rowD * (rx1 - rx0) / VW, sy = rowD * (ry1 - ry0) / VW;
+    let fx = px + rowD * rx0, fy = py + rowD * ry0;
+    const s = light(rowD), yc = VH - 1 - y;
+    for (let x = 0; x < VW; x++) {
+      const cx = Math.floor(fx), cy = Math.floor(fy);
+      const ti = ((Math.floor((fy - cy) * TS) & 31) * TS) + (Math.floor((fx - cx) * TS) & 31);
+      const t = (cx >= 0 && cy >= 0 && cx < W && cy < H) ? m.tiles[cy * W + cx] : 0;
+      vbuf[y * VW + x] = shadeC((t === 2 ? TEX.stairs : TEX.floor)[ti], s, x, y);
+      vbuf[yc * VW + x] = shadeC(TEX.ceil[ti], s * .75, x, yc);
+      fx += sx; fy += sy;
+    }
   }
-  const glows = [];
-  for (let s = x0 + y0; s <= x1 + y1; s++) {
-    for (let x = x0; x <= x1; x++) {
-      const y = s - x;
-      if (y < y0 || y > y1) continue;
-      const i = y * m.w + x;
-      let lvl;
-      if (title) { const d = Math.hypot(x - cam.x, y - cam.y); if (d > 12) continue; lvl = Math.min(5, Math.floor(d / 2.2)); }
-      else { if (!m.explored[i]) continue; lvl = m.vis[i] ? m.vis[i] - 1 : 5; }
-      const sx = Math.round(ox + (x - y) * 16), sy = Math.round(oy + (x + y) * 8);
-      if (sx < -40 || sx > LW + 40 || sy < -40 || sy > LH + 40) continue;
-      const t = m.tiles[i];
-      if (t) {
-        ctx.drawImage(t === 2 ? stairSpr[lvl] : floorSpr[hash(x, y) % 6][lvl], sx - 16, sy - 8);
-        if (t === 2 && !title) {
-          const b = Math.round(Math.sin(T / 250) * 1.5);
-          ctx.fillStyle = lvl < 5 ? '#e0ccff' : '#6b56a0';
-          for (let k = 0; k < 4; k++) ctx.fillRect(sx - 3 + k, sy - 20 + b + k, 7 - k * 2, 1);
-        }
-        const it = itemAt.get(i);
-        if (it && !title) {
-          const b = Math.round(Math.sin(T / 300 + x) * 1);
-          isoFill(sx, sy + 1, 4, 1, 'rgba(0,0,0,.4)');
-          ctx.globalAlpha = lvl < 5 ? 1 : .5;
-          ctx.drawImage(ITEM_SPR[it.id], sx - 4, sy - 7 + b);
-          ctx.globalAlpha = 1;
-        }
-        if (i === drawTile) drawPlayerAt(Math.round(ox + (player.rx - player.ry) * 16), Math.round(oy + (player.rx + player.ry) * 8));
-      } else {
-        const wt = m.wall[i];
-        if (!wt) continue;
-        const h = wt === 1 ? WALLH : LOWH;
-        let a = 1;
-        if (!title && wt === 1 && s > psum && s - psum <= 3 && Math.abs(x - player.x) <= 2 && Math.abs(y - player.y) <= 2) a = .4;
-        ctx.globalAlpha = a;
-        ctx.drawImage((wt === 1 ? wallSpr : lowSpr)[hash(x, y) % 3][lvl], sx - 16, sy - 8 - h);
-        ctx.globalAlpha = 1;
-        const tc = m.torchAt.get(i);
-        if (tc && wt === 1 && a === 1) {
-          const tx = tc.face === 'R' ? sx + 8 : sx - 9, ty = sy - 9;
-          ctx.fillStyle = '#1a0f26'; ctx.fillRect(tx - 1, ty, 3, 2); ctx.fillRect(tx, ty + 2, 1, 2);
-          const f = (hash(x, Math.floor(T / 120)) % 3);
-          const fh = 3 + (f > 0 ? 1 : 0);
-          ctx.fillStyle = '#7a4ad0'; ctx.fillRect(tx - 1, ty - fh, 3, fh);
-          ctx.fillStyle = '#c9a8ff'; ctx.fillRect(tx, ty - fh + (f === 2 ? 0 : 1), 1, fh - 1);
-          ctx.fillStyle = '#ffffff'; ctx.fillRect(tx, ty - 2, 1, 1);
-          if (lvl < 5 || title) glows.push([tx, ty - 2, 20 + f * 2]);
-        }
+  // 壁（DDA）
+  for (let x = 0; x < VW; x++) {
+    const cam = 2 * (x + .5) / VW - 1;
+    const rdx = dx + plx * cam, rdy = dy + ply * cam;
+    let mx = Math.floor(px), my = Math.floor(py);
+    const ddx = Math.abs(1 / rdx), ddy = Math.abs(1 / rdy);
+    let stx, sty, sdx, sdy;
+    if (rdx < 0) { stx = -1; sdx = (px - mx) * ddx; } else { stx = 1; sdx = (mx + 1 - px) * ddx; }
+    if (rdy < 0) { sty = -1; sdy = (py - my) * ddy; } else { sty = 1; sdy = (my + 1 - py) * ddy; }
+    let side = 0, hitK = -1;
+    for (let i = 0; i < 80; i++) {
+      if (sdx < sdy) { sdx += ddx; mx += stx; side = 0; } else { sdy += ddy; my += sty; side = 1; }
+      if (mx < 0 || my < 0 || mx >= W || my >= H) break;
+      const k = my * W + mx;
+      if (record && (side === 0 ? sdx - ddx : sdy - ddy) < 7) m.explored[k] = 1;
+      if (m.tiles[k] === 0) { hitK = k; break; }
+    }
+    const pd = Math.max(.05, side === 0 ? sdx - ddx : sdy - ddy);
+    zbuf[x] = pd;
+    let wx = side === 0 ? py + pd * rdy : px + pd * rdx;
+    wx -= Math.floor(wx);
+    let tx = Math.floor(wx * TS) & 31;
+    if ((side === 0 && rdx > 0) || (side === 1 && rdy < 0)) tx = TS - 1 - tx;
+    const torch = hitK >= 0 && m.torchSet.has(hitK);
+    const tex = torch ? TEX.torch[tf] : TEX.wall[hash(mx, my) % 3];
+    const lh = VH / pd, top = half - lh / 2;
+    const y0 = Math.max(0, Math.ceil(top - .5)), y1 = Math.min(VH, Math.ceil(top + lh - .5));
+    const s = Math.min(1, light(pd) * (side ? .78 : 1) + (torch ? .25 : 0));
+    for (let y = y0; y < y1; y++) {
+      const ty = Math.floor((y + .5 - top) / lh * TS) & 31;
+      vbuf[y * VW + x] = shadeC(tex[ty * TS + tx], s, x, y);
+    }
+  }
+  // アイテムと階段マーク（ビルボード）
+  const list = [];
+  if (record) for (const it of m.items) list.push({ x: it.x + .5, y: it.y + .5, d: SPRD[it.id], sc: .3, lift: .02 + Math.sin(T / 300 + it.x) * .02 });
+  if (record && m.stairs) list.push({ x: m.stairs.x + .5, y: m.stairs.y + .5, d: SPRD.mark, sc: .2, lift: .3 + Math.sin(T / 250) * .04 });
+  for (const o of list) o.dist = (o.x - px) ** 2 + (o.y - py) ** 2;
+  list.sort((a, b) => b.dist - a.dist);
+  const inv = 1 / (plx * dy - dx * ply);
+  for (const o of list) {
+    const sx = o.x - px, sy = o.y - py;
+    const tX = inv * (dy * sx - dx * sy), tY = inv * (-ply * sx + plx * sy);
+    if (tY <= .25 || tY > 12) continue;
+    const scrX = (VW / 2) * (1 + tX / tY);
+    const size = VH * o.sc / tY, w = size * o.d.w / o.d.h;
+    const bottom = half + half / tY - o.lift * VH / tY, topY = bottom - size;
+    const x0 = Math.max(0, Math.floor(scrX - w / 2)), x1 = Math.min(VW, Math.ceil(scrX + w / 2));
+    const ya = Math.max(0, Math.floor(topY)), yb = Math.min(VH, Math.ceil(bottom));
+    const s = Math.min(1, light(tY) + .15);
+    for (let x = x0; x < x1; x++) {
+      if (zbuf[x] < tY) continue;
+      const u = Math.floor((x + .5 - (scrX - w / 2)) / w * o.d.w);
+      if (u < 0 || u >= o.d.w) continue;
+      for (let y = ya; y < yb; y++) {
+        const v = Math.floor((y + .5 - topY) / size * o.d.h);
+        if (v < 0 || v >= o.d.h) continue;
+        const c = o.d.px[v * o.d.w + u];
+        if ((c >>> 24) === 0) continue;
+        vbuf[y * VW + x] = shadeC(c, s, x, y);
       }
     }
   }
-  // 光（加算合成）
-  ctx.globalCompositeOperation = 'lighter';
-  for (const [gx, gy, r] of glows) {
-    const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
-    g.addColorStop(0, 'rgba(170,110,255,.35)'); g.addColorStop(1, 'rgba(170,110,255,0)');
-    ctx.fillStyle = g; ctx.fillRect(gx - r, gy - r, r * 2, r * 2);
+  vctx.putImageData(vimg, 0, 0);
+}
+function drawView(title) {
+  let px, py, ang;
+  if (title) {
+    const r = titleMap.rooms.find(r => !r.dummy && r.cx === 1 && r.cy === 1) || titleMap.rooms.find(r => !r.dummy);
+    px = r.x + r.w / 2; py = r.y + r.h / 2; ang = T / 7000;
+  } else {
+    ang = player.ang;
+    // カメラはマスの少し後ろ（目の前の壁が近づきすぎないように）
+    px = player.rx + .5 - Math.cos(ang) * .42; py = player.ry + .5 - Math.sin(ang) * .42;
+    const bt = T - player.bumpT;
+    if (bt < 220) { const b = Math.sin(bt / 220 * Math.PI) * .12; px += Math.cos(ang) * b; py += Math.sin(ang) * b; }
   }
-  if (!title) {
-    const g = ctx.createRadialGradient(240, 100, 0, 240, 100, 60);
-    g.addColorStop(0, 'rgba(140,100,220,.14)'); g.addColorStop(1, 'rgba(140,100,220,0)');
-    ctx.fillStyle = g; ctx.fillRect(180, 40, 120, 120);
-  }
-  ctx.globalCompositeOperation = 'source-over';
+  renderView(px, py, ang, !title);
+  ctx.drawImage(view, 0, 0, 480, title ? 320 : 224);
 }
 function drawMotes() {
   for (const m of motes) {
@@ -1189,30 +1206,68 @@ function drawMessages() {
   show.forEach((o, k) => txt(o.l, x + 9, y + 8 + k * 12, o.newest ? '#ecdfff' : '#8f7bb8'));
   if (skipWait && Math.floor(T / 300) % 2) { ctx.fillStyle = '#c9a8ff'; ctx.fillRect(x + w - 12, y + 78, 5, 1); ctx.fillRect(x + w - 11, y + 79, 3, 1); ctx.fillRect(x + w - 10, y + 80, 1, 1); }
 }
-function drawHUD() {
-  panel(6, 6, 50, 20, .85);
-  txt(`B${depth}F`, 31, 11, '#f2d27a', 8, 'center');
-  // 方角ガイド（アイソ視点での矢印キーの向き）
-  panel(6, 30, 50, 44, .75);
-  const cx = 31, cy = 52;
-  ctx.fillStyle = '#4f3f80';
-  for (let i = -6; i <= 6; i++) { ctx.fillRect(cx + i * 2, cy + i, 2, 1); ctx.fillRect(cx - i * 2, cy + i, 2, 1); }
-  txt('↑', cx + 14, cy - 17, '#e0ccff', 8, 'center');
-  txt('→', cx + 15, cy + 5, '#e0ccff', 8, 'center');
-  txt('↓', cx - 14, cy + 5, '#e0ccff', 8, 'center');
-  txt('←', cx - 15, cy - 17, '#e0ccff', 8, 'center');
-  // ミニマップ（上から見た図・矢印キーの向きと一致）
-  const mx = LW - 92, my = 6;
-  panel(mx, my, 88, 88, .6);
-  const m = map;
-  for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
-    const i = y * m.w + x;
-    if (!m.explored[i] || !m.tiles[i]) continue;
-    ctx.fillStyle = m.tiles[i] === 2 ? '#e0ccff' : m.vis[i] ? '#7a64b0' : '#4a3a78';
-    ctx.fillRect(mx + 2 + x * 2, my + 2 + y * 2, 2, 2);
+function tri(cx, cy, r, dir, col) {   // 向きを示す三角（ドット）
+  ctx.fillStyle = col;
+  for (let i = 0; i <= r; i++) {
+    if (dir === 0) ctx.fillRect(cx - i, cy - r + i, 2 * i + 1, 1);
+    else if (dir === 2) ctx.fillRect(cx - i, cy + r - i, 2 * i + 1, 1);
+    else if (dir === 1) ctx.fillRect(cx + r - i, cy - i, 1, 2 * i + 1);
+    else ctx.fillRect(cx - r + i, cy - i, 1, 2 * i + 1);
   }
-  for (const it of m.items) if (m.explored[it.y * m.w + it.x]) { ctx.fillStyle = it.id === 'gold' ? '#f2d27a' : '#9be07a'; ctx.fillRect(mx + 2 + it.x * 2, my + 2 + it.y * 2, 2, 2); }
-  if (Math.floor(T / 300) % 2) { ctx.fillStyle = '#ffe08a'; ctx.fillRect(mx + 2 + player.x * 2 - 1, my + 2 + player.y * 2 - 1, 4, 4); }
+}
+// オートマップ（通ったところ・見えたところだけ描かれる）
+function drawAutomap(ox, oy, cs, cx0, cy0, cols, rows) {
+  const m = map;
+  ctx.fillStyle = '#1c1330'; ctx.fillRect(ox, oy, cols * cs, rows * cs);
+  ctx.fillStyle = '#2b2046';
+  for (let i = 0; i <= cols; i++) ctx.fillRect(ox + i * cs, oy, 1, rows * cs);
+  for (let j = 0; j <= rows; j++) ctx.fillRect(ox, oy + j * cs, cols * cs, 1);
+  const inMap = (x, y) => x >= 0 && y >= 0 && x < m.w && y < m.h;
+  const isW = (x, y) => !inMap(x, y) || !m.tiles[y * m.w + x];
+  const cells = [];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const x = cx0 + i, y = cy0 + j;
+    if (!inMap(x, y)) continue;
+    const k = y * m.w + x;
+    if (m.explored[k] && m.tiles[k]) cells.push([x, y, ox + i * cs, oy + j * cs]);
+  }
+  ctx.fillStyle = '#07040c';
+  for (const [, , X, Y] of cells) ctx.fillRect(X, Y, cs, cs);
+  ctx.fillStyle = '#d8c8ff';
+  for (const [x, y, X, Y] of cells) {
+    if (isW(x, y - 1)) ctx.fillRect(X, Y, cs, 1);
+    if (isW(x, y + 1)) ctx.fillRect(X, Y + cs - 1, cs, 1);
+    if (isW(x - 1, y)) ctx.fillRect(X, Y, 1, cs);
+    if (isW(x + 1, y)) ctx.fillRect(X + cs - 1, Y, 1, cs);
+  }
+  const at = (x, y) => [ox + (x - cx0) * cs + (cs >> 1), oy + (y - cy0) * cs + (cs >> 1)];
+  const inView = (x, y) => x >= cx0 && y >= cy0 && x < cx0 + cols && y < cy0 + rows;
+  const st = m.stairs;
+  if (inView(st.x, st.y) && m.explored[st.y * m.w + st.x]) { const [X, Y] = at(st.x, st.y); tri(X, Y, cs > 4 ? 2 : 1, 2, '#c9a8ff'); }
+  for (const it of m.items) {
+    if (!inView(it.x, it.y) || !m.explored[it.y * m.w + it.x]) continue;
+    const [X, Y] = at(it.x, it.y);
+    ctx.fillStyle = it.id === 'gold' ? '#f2d27a' : '#9be07a'; ctx.fillRect(X - 1, Y - 1, 2, 2);
+  }
+  if (inView(player.x, player.y)) { const [X, Y] = at(player.x, player.y); tri(X, Y, cs > 4 ? 2 : 1, player.dir, '#ff4a6a'); }
+}
+function drawHUD() {
+  panel(6, 6, 74, 20, .85);
+  txt(`B${depth}F`, 14, 11, '#f2d27a');
+  txt(`${DIRNAME[player.dir]}向き`, 72, 11, '#e0ccff', 8, 'right');
+  // ミニ・オートマップ（タップで全体マップ）
+  const mx = LW - 92, my = 6;
+  panel(mx, my, 88, 88, .75);
+  drawAutomap(mx + 2, my + 2, 4, player.x - 10, player.y - 10, 21, 21);
+  txt('M:マップ', mx + 44, my + 91, '#8f7bb8', 8, 'center');
+  if (mode === 'field' && !overlay && !busy) hit(mx, my, 88, 100, () => { dirStack = []; overlay = { type: 'map' }; });
+  // タッチ操作のガイド
+  if (pointer.touch && mode === 'field' && !overlay) {
+    ctx.globalAlpha = .35;
+    txt('◀', 16, 106, '#e0ccff', 12); txt('▶', 452, 106, '#e0ccff', 12);
+    txt('▲', 240, 150, '#e0ccff', 12, 'center'); txt('▼', 240, 200, '#e0ccff', 12, 'center');
+    ctx.globalAlpha = 1;
+  }
 }
 
 // ---------- バトル画面 ----------
@@ -1281,6 +1336,17 @@ function drawBattle() {
 }
 function drawOverlay() {
   const o = overlay;
+  if (o.type === 'map') {
+    const cs = 5, W = map.w * cs, x = Math.floor((LW - W) / 2), y = 9;
+    ctx.fillStyle = 'rgba(7,4,12,.6)'; ctx.fillRect(0, 0, LW, 224);
+    panel(x - 5, y - 5, W + 10, W + 10);
+    drawAutomap(x, y, cs, 0, 0, map.w, map.h);
+    panel(14, 14, 104, 46);
+    txt(`地下 ${depth}階`, 66, 21, '#ecdfff', 12, 'center');
+    txt('M / Esc：とじる', 66, 43, '#8f7bb8', 8, 'center');
+    hit(0, 0, LW, 224, () => { overlay = null; });
+    return;
+  }
   if (o.type === 'confirm') {
     panel(160, 70, 160, 60);
     txt('かいだんが ある。', 240, 80, '#ecdfff', 8, 'center');
@@ -1326,7 +1392,7 @@ function drawOverlay() {
 
 // ---------- タイトル / ゲームオーバー ----------
 function drawTitle() {
-  drawField(true);
+  drawView(true);
   drawMotes();
   drawVignette();
   ctx.fillStyle = 'rgba(7,4,12,.35)'; ctx.fillRect(0, 0, LW, LH);
@@ -1372,7 +1438,7 @@ function draw() {
   } else {
     ctx.save();
     if (shake > 0) ctx.translate(Math.round((Math.random() - .5) * shake), Math.round((Math.random() - .5) * shake));
-    drawField(false);
+    drawView(false);
     drawMotes();
     drawVignette();
     if (mode === 'battle' && battle) drawBattle();
