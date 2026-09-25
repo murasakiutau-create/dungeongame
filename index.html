@@ -2,19 +2,21 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#07040c">
 <title>紫晶の迷宮</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
 <style>
-  html,body{margin:0;height:100%;background:#07040c;overflow:hidden}
+  html,body{margin:0;height:100%;background:#07040c;overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   body{display:flex;flex-direction:column;align-items:center;justify-content:center;
        font-family:'DotGothic16',monospace;color:#9a88c0}
   canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
-         width:min(100vw,calc((100vh - 28px)*1.5));aspect-ratio:3/2;
+         width:min(100vw,calc((100dvh - 28px)*1.5));aspect-ratio:3/2;
          background:#07040c;touch-action:none;outline:none}
   .help{font-size:12px;margin-top:6px;letter-spacing:1px;opacity:.75;text-align:center}
+  body.portrait .help{display:none}
 </style>
 </head>
 <body>
@@ -25,10 +27,10 @@
 // =====================================================================
 //  紫晶の迷宮 — Vanilla JS + Canvas の一人称3Dダンジョン RPG
 // =====================================================================
-const LW = 480, LH = 320, S = 2;          // 論理解像度 × 2 倍で描画
+let LW = 480, LH = 320, S = 2, CX = 240, PORTRAIT = false;   // 論理解像度（縦画面ではスマホ用に切り替え）
+let L = {};
 const cv = document.getElementById('game');
 const ctx = cv.getContext('2d');
-cv.width = LW * S; cv.height = LH * S;
 const FONT = "'DotGothic16','MS Gothic',monospace";
 const SAVE_KEY = 'amethyst-labyrinth-save-v1';
 
@@ -496,7 +498,7 @@ function saveGame(silent) {
       tiles: Array.from(map.tiles), explored: Array.from(map.explored), rooms: map.rooms,
       stairs: map.stairs, start: map.start, items: map.items, torches: map.torches } };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    if (!silent) { note('きろくを セーブしました。'); burst(240, 100, 16, ['#e0ccff', '#b89cff'], 1, 700, -.01); }
+    if (!silent) { note('きろくを セーブしました。'); burst(CX, L.vh / 2, 16, ['#e0ccff', '#b89cff'], 1, 700, -.01); }
     return true;
   } catch (e) { note('セーブできませんでした…'); return false; }
 }
@@ -533,8 +535,8 @@ async function newGame() {
   enterFloor(); mode = 'field'; overlay = null; battle = null;
   await fadeTo(0);
   note('ここは むらさきに ひかる めいきゅう…');
-  note('↑で すすみ ←→で むきを かえる。');
-  note('かいだんを さがそう！ M:マップ');
+  if (PORTRAIT) { note('▲で すすみ ◀▶で むきを かえる。'); note('かいだんを さがそう！'); }
+  else { note('↑で すすみ ←→で むきを かえる。'); note('かいだんを さがそう！ M:マップ'); }
   busy = false;
 }
 async function continueGame() {
@@ -592,7 +594,7 @@ function onArrive() {
     const it = map.items[idx]; map.items.splice(idx, 1);
     if (it.id === 'gold') { p.gold += it.amount; note(`${it.amount}G を ひろった！`); }
     else { p.items[it.id] = (p.items[it.id] || 0) + 1; note(`${ITEMS[it.id].name}を ひろった！`); }
-    burst(240, 108, 10, ['#f2d27a', '#fff6c0'], 1, 500, -.01);
+    burst(CX, L.vh / 2, 10, ['#f2d27a', '#fff6c0'], 1, 500, -.01);
   }
   if (map.tiles[p.y * map.w + p.x] === 2) { dirStack = []; overlay = { type: 'confirm', cursor: 0 }; return; }
   if (p.safe > 0) { p.safe--; return; }
@@ -609,7 +611,7 @@ function makeEnemy(d) {
   return Object.assign({}, b, { hp, mhp: hp, atk: Math.round(b.atk * k), def: Math.round(b.def * k),
     exp: Math.round(b.exp * (1 + (d - 1) * .15)), gold: Math.round(b.gold * (1 + (d - 1) * .2)) });
 }
-const EX = 240, EY = 100;   // バトル画面での敵の中心
+let EX = 240, EY = 100;   // バトル画面での敵の中心（レイアウトで変わる）
 async function startBattle() {
   dirStack = []; pointer.field = false;
   const e = makeEnemy(depth);
@@ -629,7 +631,7 @@ function hitEnemy(dmg, col) {
 function hurtPlayer(dmg) {
   player.hp = Math.max(0, player.hp - dmg);
   if (dmg > 0) { shake = 7; flashT = T; flashCol = '#ff3060'; }
-  dmgNum(80, 232, dmg > 0 ? String(dmg) : 'MISS', '#ff8aa8');
+  dmgNum(L.st.x + 74, L.st.y + 6, dmg > 0 ? String(dmg) : 'MISS', '#ff8aa8');
 }
 async function doCommand(i) {
   if (busy || !battle) return;
@@ -712,7 +714,7 @@ async function enemyTurn() {
   if (skill === 'drain') {
     await say(`${e.name}は ぶきみに ささやいた…`, 450);
     const a = Math.min(p.mp, rand(2, 5));
-    p.mp -= a; burst(60, 262, 14, ['#6aa8ff', '#b8d0ff'], 1.2, 600, -.01);
+    p.mp -= a; burst(L.st.x + 54, L.st.y + 36, 14, ['#6aa8ff', '#b8d0ff'], 1.2, 600, -.01);
     await say(a ? `MPを ${a} すいとられた！` : 'しかし なにも おこらなかった。');
     return;
   }
@@ -764,7 +766,7 @@ async function levelUp() {
   p.mhp += a; p.mmp += b; p.atk += c; p.def += d;
   p.hp = p.mhp; p.mp = p.mmp;
   lvupT = T; flashT = T; flashCol = '#fff0a0';
-  burst(80, 250, 30, ['#f2d27a', '#fff6c0', '#e0ccff'], 1.8, 900, -.02);
+  burst(L.st.x + 70, L.st.y + 30, 30, ['#f2d27a', '#fff6c0', '#e0ccff'], 1.8, 900, -.02);
   await say(`レベルが ${p.lv}に あがった！`, 900);
   await say(`HP+${a} MP+${b} こうげき+${c} ぼうぎょ+${d}`, 800);
   for (const s of SPELLS.filter(s => s.lv === p.lv)) await say(`${s.name}の まほうを おぼえた！`, 800);
@@ -788,7 +790,7 @@ function canUse(id) {
 function applyItem(id) {
   const p = player;
   if (id === 'herb' || id === 'bigherb') { const a = Math.min(id === 'herb' ? 30 : 100, p.mhp - p.hp); p.hp += a; healFx(); return `HPが ${a} かいふくした！`; }
-  if (id === 'water') { const a = Math.min(15, p.mmp - p.mp); p.mp += a; burst(60, 262, 16, ['#6aa8ff', '#e0f0ff'], 1.2, 700, -.02); return `MPが ${a} かいふくした！`; }
+  if (id === 'water') { const a = Math.min(15, p.mmp - p.mp); p.mp += a; burst(L.st.x + 54, L.st.y + 36, 16, ['#6aa8ff', '#e0f0ff'], 1.2, 700, -.02); return `MPが ${a} かいふくした！`; }
   if (id === 'seed') { p.atk++; return 'こうげきりょくが 1 あがった！'; }
   if (id === 'guard') { p.def++; return 'ぼうぎょりょくが 1 あがった！'; }
   return '';
@@ -814,8 +816,8 @@ function burst(x, y, n, colors, spd = 1.5, life = 600, g = .02) {
   }
 }
 function healFx() {
-  burst(60, 250, 20, ['#9be07a', '#e0ffd0', '#c9a8ff'], 1.2, 800, -.02);
-  if (mode === 'battle') burst(140, 185, 20, ['#9be07a', '#e0ffd0'], 1.2, 800, -.02);
+  burst(L.st.x + 54, L.st.y + 30, 20, ['#9be07a', '#e0ffd0', '#c9a8ff'], 1.2, 800, -.02);
+  if (mode === 'battle') burst(L.hero.x + 18, L.hero.y + 20, 20, ['#9be07a', '#e0ffd0'], 1.2, 800, -.02);
 }
 const pixCache = new Map();
 function spriteParticles(spr, x, y, scale) {
@@ -903,14 +905,14 @@ function hitTest(x, y) { for (let i = hits.length - 1; i >= 0; i--) { const h = 
 cv.addEventListener('pointerdown', e => {
   cv.focus();
   const p = toLogical(e);
-  pointer.x = p.x; pointer.y = p.y; pointer.down = true; pointer.field = false; pointer.touch = e.pointerType === 'touch';
+  pointer.x = p.x; pointer.y = p.y; pointer.down = true; pointer.field = false; pointer.touch = e.pointerType === 'touch'; pointer.pad = -1;
   if (skipWait) { skipWait(); return; }
   if (fadeA > .05) return;
   if (mode === 'gameover') { if (T - goT > 900) toTitle(); return; }
   const h = hitTest(p.x, p.y);
   if (h) { h.fn(); return; }
   if (overlay && overlay.type !== 'confirm') { overlay = null; return; }
-  if (mode === 'field' && !overlay && p.y < 224) {
+  if (mode === 'field' && !overlay && p.y < L.vh) {
     const a = pointerAct();
     if (a === 1 || a === 3) pendingTurn = a;
     else { pointer.field = true; try { cv.setPointerCapture(e.pointerId); } catch (_) {} }
@@ -921,12 +923,13 @@ cv.addEventListener('pointermove', e => {
   const h = hitTest(p.x, p.y);
   if (h && h.hover) h.hover();
 });
-addEventListener('pointerup', () => { pointer.down = false; pointer.field = false; });
+addEventListener('pointerup', () => { pointer.down = false; pointer.field = false; pointer.pad = -1; });
+addEventListener('pointercancel', () => { pointer.down = false; pointer.field = false; pointer.pad = -1; });
 // 画面タップ：左右の端＝向きを変える / 下のほう＝後退 / それ以外＝前進
 function pointerAct() {
-  if (pointer.x < 130) return 3;
-  if (pointer.x > 350) return 1;
-  return pointer.y > 170 ? 2 : 0;
+  if (pointer.x < LW * .27) return 3;
+  if (pointer.x > LW * .73) return 1;
+  return pointer.y > L.vh * .76 ? 2 : 0;
 }
 function hit(x, y, w, h, fn, hover) { hits.push({ x, y, w, h, fn, hover }); }
 
@@ -953,6 +956,7 @@ function update(dt) {
   if (mode === 'field' && !busy && !overlay && !player.moving && !player.turning && fadeA < .05) {
     let a = dirStack.length ? dirStack[dirStack.length - 1] : -1;
     if (a < 0 && pendingTurn >= 0) a = pendingTurn;
+    if (a < 0 && pointer.down && pointer.pad >= 0) a = pointer.pad;
     if (a < 0 && pointer.down && pointer.field) { a = pointerAct(); if (a === 1 || a === 3) a = -1; }
     pendingTurn = -1;
     if (a >= 0) tryAct(a);
@@ -962,7 +966,7 @@ function update(dt) {
   parts = parts.filter(p => p.t < p.life);
   nums = nums.filter(n => T - n.t < 1100);
   shake = Math.max(0, shake - dt / 40);
-  for (const m of motes) { m.y -= m.v * dt / 16; m.x += Math.sin((T / 1000) + m.p) * .1; if (m.y < -4) { m.y = 232; m.x = Math.random() * LW; } }
+  for (const m of motes) { m.y -= m.v * dt / 16; m.x += Math.sin((T / 1000) + m.p) * .1; if (m.y < -4) { m.y = L.vh + 8; m.x = Math.random() * LW; } }
 }
 
 // =====================================================================
@@ -1017,10 +1021,13 @@ function wrap(text, maxW) {
 // =====================================================================
 //  ダンジョン描画
 // =====================================================================
-const VW = 240, VH = 112;                     // 3D ビューの内部解像度（ドット感のため低解像度）
-const view = mk(VW, VH), vctx = view.getContext('2d');
-const vimg = vctx.createImageData(VW, VH), vbuf = new Uint32Array(vimg.data.buffer);
-const zbuf = new Float32Array(VW);
+let VW, VH, view, vctx, vimg, vbuf, zbuf;       // 3D ビューの内部解像度（ドット感のため低解像度）
+function allocView(w, h) {
+  VW = w; VH = h;
+  view = mk(VW, VH); vctx = view.getContext('2d');
+  vimg = vctx.createImageData(VW, VH); vbuf = new Uint32Array(vimg.data.buffer);
+  zbuf = new Float32Array(VW);
+}
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 const FOGC = rgb(7, 4, 12);
 const light = d => clamp(1.3 - d / 5.5, 0, 1);
@@ -1130,7 +1137,8 @@ function drawView(title) {
     if (bt < 220) { const b = Math.sin(bt / 220 * Math.PI) * .12; px += Math.cos(ang) * b; py += Math.sin(ang) * b; }
   }
   renderView(px, py, ang, !title);
-  ctx.drawImage(view, 0, 0, 480, title ? 320 : 224);
+  if (title && !PORTRAIT) ctx.drawImage(view, 0, 0, LW, LH);
+  else ctx.drawImage(view, 0, title ? L.ty : 0, LW, L.vh);
 }
 function drawMotes() {
   for (const m of motes) {
@@ -1142,7 +1150,8 @@ function drawMotes() {
 let vignette = null;
 function drawVignette() {
   if (!vignette) {
-    vignette = ctx.createRadialGradient(240, 110, 90, 240, 110, 290);
+    const k = LW / 480;
+    vignette = ctx.createRadialGradient(CX, L.vh / 2, 90 * k, CX, L.vh / 2, 290 * k);
     vignette.addColorStop(0, 'rgba(7,4,12,0)'); vignette.addColorStop(1, 'rgba(7,4,12,.9)');
   }
   ctx.fillStyle = vignette; ctx.fillRect(0, 0, LW, LH);
@@ -1152,59 +1161,78 @@ function drawVignette() {
 //  UI 描画
 // =====================================================================
 function drawStatus() {
-  const p = player, x = 6, y = 226;
-  panel(x, y, 150, 88);
+  const p = player, { x, y, w, h } = L.st, r = x + w - 10, bw = w - 20;
+  panel(x, y, w, h);
   txt(p.name, x + 10, y + 8, '#ecdfff');
-  txt(`LV ${p.lv}`, x + 140, y + 8, '#f2d27a', 8, 'right');
+  txt(`LV ${p.lv}`, r, y + 8, '#f2d27a', 8, 'right');
   const low = p.hp / p.mhp < .25;
   const hpCol = low && Math.floor(T / 300) % 2 ? '#ff4060' : '#e0648c';
-  txt('HP', x + 10, y + 22, '#e0a0c0'); txt(`${p.hp} / ${p.mhp}`, x + 140, y + 22, low ? '#ff8aa8' : '#ecdfff', 8, 'right');
-  bar(x + 10, y + 33, 130, 4, p.hp / p.mhp, hpCol, '#ffb0c8');
-  txt('MP', x + 10, y + 40, '#a0c0f0'); txt(`${p.mp} / ${p.mmp}`, x + 140, y + 40, '#ecdfff', 8, 'right');
-  bar(x + 10, y + 51, 130, 4, p.mp / p.mmp, '#6aa8ff', '#c0dcff');
-  txt('EXP', x + 10, y + 58, '#b0d8a0', 8); txt(`あと ${p.next - p.exp}`, x + 140, y + 58, '#9a88c0', 8, 'right');
-  bar(x + 10, y + 69, 130, 2, p.exp / p.next, '#9be07a', '#d0ffc0');
+  txt('HP', x + 10, y + 22, '#e0a0c0'); txt(`${p.hp} / ${p.mhp}`, r, y + 22, low ? '#ff8aa8' : '#ecdfff', 8, 'right');
+  bar(x + 10, y + 33, bw, 4, p.hp / p.mhp, hpCol, '#ffb0c8');
+  txt('MP', x + 10, y + 40, '#a0c0f0'); txt(`${p.mp} / ${p.mmp}`, r, y + 40, '#ecdfff', 8, 'right');
+  bar(x + 10, y + 51, bw, 4, p.mp / p.mmp, '#6aa8ff', '#c0dcff');
+  txt('EXP', x + 10, y + 58, '#b0d8a0', 8); txt(`あと ${p.next - p.exp}`, r, y + 58, '#9a88c0', 8, 'right');
+  bar(x + 10, y + 69, bw, 2, p.exp / p.next, '#9be07a', '#d0ffc0');
   txt(`攻${p.atk} 防${p.def}`, x + 10, y + 75, '#9a88c0');
-  txt(`${p.gold}G`, x + 140, y + 75, '#f2d27a', 8, 'right');
+  txt(`${p.gold}G`, r, y + 75, '#f2d27a', 8, 'right');
 }
 const CMDS = ['こうげき', 'ぼうぎょ', 'まほう', 'にげる'];
 function drawCommands() {
-  const x = 324, y = 226, inB = mode === 'battle';
-  panel(x, y, 150, 88);
-  txt(inB ? 'コマンド' : '― たんさくちゅう ―', x + 75, y + 7, '#8f7bb8', 8, 'center');
+  const { x, y, w, h } = L.cmd, inB = mode === 'battle', cw = (w - 14) / 2;
+  panel(x, y, w, h);
+  txt(inB ? 'コマンド' : PORTRAIT ? '― たんさく ―' : '― たんさくちゅう ―', x + w / 2, y + 7, '#8f7bb8', 8, 'center');
   const active = inB && !busy && !overlay;
   for (let i = 0; i < 4; i++) {
-    const cx = x + 16 + (i % 2) * 68, cy = y + 22 + Math.floor(i / 2) * 18;
+    const cx = Math.round(x + 16 + (i % 2) * cw), cy = y + 22 + Math.floor(i / 2) * 18;
     const sel = inB && battle && battle.cursor === i;
     if (sel && active) {
-      ctx.fillStyle = 'rgba(155,106,224,.25)'; ctx.fillRect(cx - 12, cy - 2, 64, 13);
+      ctx.fillStyle = 'rgba(155,106,224,.25)'; ctx.fillRect(cx - 12, cy - 2, cw - 4, 13);
       cursorArrow(cx - 10, cy + 1);
     }
     txt(CMDS[i], cx, cy, inB ? (sel ? '#ffffff' : '#cbb8f0') : '#4f3f70');
-    if (active) hit(cx - 12, cy - 3, 64, 16, () => doCommand(i), () => { battle.cursor = i; });
+    if (active) hit(cx - 12, cy - 4, cw - 2, 18, () => doCommand(i), () => { battle.cursor = i; });
   }
   // 小ボタン
+  const bw = Math.floor((w - 26) / 2);
   const btn = (bx, label, fn, on) => {
-    ctx.fillStyle = on ? '#2e2048' : '#1c1230'; ctx.fillRect(bx, y + 64, 62, 14);
-    ctx.fillStyle = on ? '#6b56a0' : '#3a2a5c'; ctx.fillRect(bx, y + 64, 62, 1); ctx.fillRect(bx, y + 77, 62, 1);
-    txt(label, bx + 31, y + 67, on ? '#ecdfff' : '#5a4a7a', 8, 'center');
-    if (on) hit(bx, y + 64, 62, 14, fn);
+    ctx.fillStyle = on ? '#2e2048' : '#1c1230'; ctx.fillRect(bx, y + 64, bw, 14);
+    ctx.fillStyle = on ? '#6b56a0' : '#3a2a5c'; ctx.fillRect(bx, y + 64, bw, 1); ctx.fillRect(bx, y + 77, bw, 1);
+    txt(label, bx + bw / 2, y + 67, on ? '#ecdfff' : '#5a4a7a', 8, 'center');
+    if (on) hit(bx, y + 62, bw, 18, fn);
   };
   const free = !busy && !overlay && (inB || (player && !player.moving));
-  btn(x + 10, 'I:どうぐ', () => { dirStack = []; overlay = { type: 'items', cursor: 0 }; }, free);
-  btn(x + 78, 'S:セーブ', () => saveGame(false), free && !inB);
+  btn(x + 10, PORTRAIT ? 'どうぐ' : 'I:どうぐ', () => { dirStack = []; overlay = { type: 'items', cursor: 0 }; }, free);
+  btn(x + 16 + bw, PORTRAIT ? 'セーブ' : 'S:セーブ', () => saveGame(false), free && !inB);
 }
 function drawMessages() {
-  const x = 160, y = 226, w = 160;
-  panel(x, y, w, 88);
+  const { x, y, w, h, lines: N } = L.msg;
+  panel(x, y, w, h);
   const lines = [];
-  for (let i = log.length - 1; i >= 0 && lines.length < 6; i--) {
+  for (let i = log.length - 1; i >= 0 && lines.length < N; i--) {
     const ls = wrap(log[i].text, w - 18).map(l => ({ l, newest: i === log.length - 1 }));
     lines.unshift(...ls);
   }
-  const show = lines.slice(-6);
-  show.forEach((o, k) => txt(o.l, x + 9, y + 8 + k * 12, o.newest ? '#ecdfff' : '#8f7bb8'));
-  if (skipWait && Math.floor(T / 300) % 2) { ctx.fillStyle = '#c9a8ff'; ctx.fillRect(x + w - 12, y + 78, 5, 1); ctx.fillRect(x + w - 11, y + 79, 3, 1); ctx.fillRect(x + w - 10, y + 80, 1, 1); }
+  lines.slice(-N).forEach((o, k) => txt(o.l, x + 9, y + 8 + k * 12, o.newest ? '#ecdfff' : '#8f7bb8'));
+  if (skipWait && Math.floor(T / 300) % 2) { ctx.fillStyle = '#c9a8ff'; ctx.fillRect(x + w - 12, y + h - 10, 5, 1); ctx.fillRect(x + w - 11, y + h - 9, 3, 1); ctx.fillRect(x + w - 10, y + h - 8, 1, 1); }
+}
+// スマホ用の移動パッド（押しっぱなしで進み続ける）
+function drawPad() {
+  const y = L.pad.y, h = L.pad.h, gap = 4, n = 5, w = Math.floor((LW - 8 - gap * (n - 1)) / n);
+  const on = mode === 'field' && !overlay && !busy;
+  const btns = [['◀', 'ひだりへ', 3], ['▲', 'まえへ', 0], ['▼', 'うしろへ', 2], ['▶', 'みぎへ', 1], ['MAP', 'ちず', 9]];
+  btns.forEach(([icon, cap, a], i) => {
+    const x = 4 + i * (w + gap);
+    const pressed = on && pointer.down && (pointer.pad === a || (pointer.lastPad === a && T - pointer.padT < 150));
+    panel(x, y, w, h, .93);
+    if (pressed) { ctx.fillStyle = 'rgba(155,106,224,.45)'; ctx.fillRect(x + 3, y + 3, w - 6, h - 6); }
+    txt(icon, x + w / 2, y + 7, on ? '#ecdfff' : '#4f3f70', icon === 'MAP' ? 10 : 14, 'center');
+    txt(cap, x + w / 2, y + 27, on ? '#8f7bb8' : '#3a2a5c', 8, 'center');
+    if (on) hit(x, y, w, h, () => {
+      pointer.lastPad = a; pointer.padT = T;
+      if (a === 9) { dirStack = []; overlay = { type: 'map' }; }
+      else { pendingTurn = a; if (a === 0 || a === 2) pointer.pad = a; }
+    });
+  });
 }
 function tri(cx, cy, r, dir, col) {   // 向きを示す三角（ドット）
   ctx.fillStyle = col;
@@ -1256,16 +1284,18 @@ function drawHUD() {
   txt(`B${depth}F`, 14, 11, '#f2d27a');
   txt(`${DIRNAME[player.dir]}向き`, 72, 11, '#e0ccff', 8, 'right');
   // ミニ・オートマップ（タップで全体マップ）
-  const mx = LW - 92, my = 6;
-  panel(mx, my, 88, 88, .75);
-  drawAutomap(mx + 2, my + 2, 4, player.x - 10, player.y - 10, 21, 21);
-  txt('M:マップ', mx + 44, my + 91, '#8f7bb8', 8, 'center');
-  if (mode === 'field' && !overlay && !busy) hit(mx, my, 88, 100, () => { dirStack = []; overlay = { type: 'map' }; });
-  // タッチ操作のガイド
-  if (pointer.touch && mode === 'field' && !overlay) {
+  if (PORTRAIT && mode === 'battle') return;
+  const { cs, cells } = L.mini, size = cells * cs + 4, half = cells >> 1;
+  const mx = LW - size - 4, my = 6;
+  panel(mx, my, size, size, .75);
+  drawAutomap(mx + 2, my + 2, cs, player.x - half, player.y - half, cells, cells);
+  if (!PORTRAIT) txt('M:マップ', mx + size / 2, my + size + 3, '#8f7bb8', 8, 'center');
+  if (mode === 'field' && !overlay && !busy) hit(mx, my, size, size + 10, () => { dirStack = []; overlay = { type: 'map' }; });
+  // タッチ操作のガイド（横画面のとき）
+  if (!PORTRAIT && pointer.touch && mode === 'field' && !overlay) {
     ctx.globalAlpha = .35;
-    txt('◀', 16, 106, '#e0ccff', 12); txt('▶', 452, 106, '#e0ccff', 12);
-    txt('▲', 240, 150, '#e0ccff', 12, 'center'); txt('▼', 240, 200, '#e0ccff', 12, 'center');
+    txt('◀', 16, 106, '#e0ccff', 12); txt('▶', LW - 28, 106, '#e0ccff', 12);
+    txt('▲', CX, 150, '#e0ccff', 12, 'center'); txt('▼', CX, 200, '#e0ccff', 12, 'center');
     ctx.globalAlpha = 1;
   }
 }
@@ -1278,8 +1308,8 @@ function drawBattle() {
   const k = clamp((t - 300) / 300, 0, 1);
   ctx.fillStyle = `rgba(7,4,12,${.6 * k})`; ctx.fillRect(0, 0, LW, LH);
   if (k <= 0) return;
-  const BW = 280, BH = Math.round(196 * k), BX = 100, BY = 16 + Math.round((196 - BH) / 2);
-  const g = ctx.createRadialGradient(240, 110, 10, 240, 110, 170);
+  const bw = L.bw, BW = bw.w, BH = Math.round(bw.h * k), BX = bw.x, BY = bw.y + Math.round((bw.h - BH) / 2);
+  const g = ctx.createRadialGradient(CX, BY + 94, 10, CX, BY + 94, 170);
   g.addColorStop(0, '#3a2466'); g.addColorStop(.6, '#1c1034'); g.addColorStop(1, '#0c0616');
   ctx.fillStyle = g; ctx.fillRect(BX, BY, BW, BH);
   panel(BX - 2, BY - 2, BW + 4, BH + 4, 0);
@@ -1292,9 +1322,10 @@ function drawBattle() {
     ctx.fillStyle = i % 3 ? '#5a4390' : '#b89cff'; ctx.fillRect(sx, sy, 1, 1);
   }
   // 床（アイソ）
-  isoFill(240, 150, 110, 26, '#241a3c');
-  isoFill(240, 150, 100, 22, '#2e2148');
-  isoFill(240, 142, 38, 7, 'rgba(0,0,0,.45)');
+  const fw = Math.min(110, BW * .45);
+  isoFill(EX, EY + 50, fw, 26, '#241a3c');
+  isoFill(EX, EY + 50, fw - 10, 22, '#2e2148');
+  isoFill(EX, EY + 42, 38, 7, 'rgba(0,0,0,.45)');
   // 敵
   if (!b.deadT) {
     const bob = Math.round(Math.sin(T / (e.id === 'bat' ? 120 : 400)) * (e.id === 'ghost' ? 4 : 2));
@@ -1323,36 +1354,42 @@ function drawBattle() {
   // 主人公（後ろ姿）
   const ht2 = T - b.heroAtkT;
   const lunge = ht2 < 260 ? Math.sin(ht2 / 260 * Math.PI) : 0;
-  isoFill(134 + lunge * 24, 206 - lunge * 8, 16, 4, 'rgba(0,0,0,.45)');
-  ctx.drawImage(heroBack[0][0], Math.round(116 + lunge * 24), Math.round(166 - lunge * 8 + (b.defending ? 2 : 0)), 36, 42);
-  if (b.defending) { ctx.strokeStyle = `rgba(160,200,255,${.4 + .2 * Math.sin(T / 150)})`; ctx.lineWidth = 1; ctx.strokeRect(112, 162, 44, 48); }
+  const hx = L.hero.x, hy = L.hero.y;
+  isoFill(hx + 18 + lunge * 24, hy + 40 - lunge * 8, 16, 4, 'rgba(0,0,0,.45)');
+  ctx.drawImage(heroBack[0][0], Math.round(hx + lunge * 24), Math.round(hy - lunge * 8 + (b.defending ? 2 : 0)), 36, 42);
+  if (b.defending) { ctx.strokeStyle = `rgba(160,200,255,${.4 + .2 * Math.sin(T / 150)})`; ctx.lineWidth = 1; ctx.strokeRect(hx - 4, hy - 4, 44, 48); }
   ctx.restore();
   // 敵の名前と HP
   if (!b.deadT) {
-    panel(170, 22, 140, 22, .9);
-    txt(e.name, 240, 25, '#ecdfff', 8, 'center');
-    bar(182, 37, 116, 3, e.hp / e.mhp, '#c060ff', '#e0ccff');
+    panel(CX - 70, L.bw.y + 6, 140, 22, .9);
+    txt(e.name, CX, L.bw.y + 9, '#ecdfff', 8, 'center');
+    bar(CX - 58, L.bw.y + 21, 116, 3, e.hp / e.mhp, '#c060ff', '#e0ccff');
   }
 }
 function drawOverlay() {
   const o = overlay;
   if (o.type === 'map') {
-    const cs = 5, W = map.w * cs, x = Math.floor((LW - W) / 2), y = 9;
-    ctx.fillStyle = 'rgba(7,4,12,.6)'; ctx.fillRect(0, 0, LW, 224);
+    const cs = 5, W = map.w * cs, x = Math.floor((LW - W) / 2), y = PORTRAIT ? 34 : 9;
+    ctx.fillStyle = PORTRAIT ? 'rgba(7,4,12,.85)' : 'rgba(7,4,12,.6)'; ctx.fillRect(0, 0, LW, PORTRAIT ? LH : L.vh);
     panel(x - 5, y - 5, W + 10, W + 10);
     drawAutomap(x, y, cs, 0, 0, map.w, map.h);
-    panel(14, 14, 104, 46);
-    txt(`地下 ${depth}階`, 66, 21, '#ecdfff', 12, 'center');
-    txt('M / Esc：とじる', 66, 43, '#8f7bb8', 8, 'center');
-    hit(0, 0, LW, 224, () => { overlay = null; });
+    if (PORTRAIT) {
+      txt(`地下 ${depth}階`, CX, 9, '#ecdfff', 12, 'center');
+      txt('タップで とじる', CX, y + W + 12, '#8f7bb8', 8, 'center');
+    } else {
+      panel(14, 14, 104, 46);
+      txt(`地下 ${depth}階`, 66, 21, '#ecdfff', 12, 'center');
+      txt('M / Esc：とじる', 66, 43, '#8f7bb8', 8, 'center');
+    }
+    hit(0, 0, LW, LH, () => { overlay = null; });
     return;
   }
   if (o.type === 'confirm') {
-    panel(160, 70, 160, 60);
-    txt('かいだんが ある。', 240, 80, '#ecdfff', 8, 'center');
-    txt('したの かいへ おりますか？', 240, 92, '#ecdfff', 8, 'center');
+    panel(CX - 80, 70, 160, 60);
+    txt('かいだんが ある。', CX, 80, '#ecdfff', 8, 'center');
+    txt('したの かいへ おりますか？', CX, 92, '#ecdfff', 8, 'center');
     ['はい', 'いいえ'].forEach((s, i) => {
-      const bx = 196 + i * 58, by = 110;
+      const bx = CX - 44 + i * 58, by = 110;
       if (o.cursor === i) cursorArrow(bx - 10, by);
       txt(s, bx, by, o.cursor === i ? '#ffffff' : '#8f7bb8');
       hit(bx - 12, by - 3, 50, 14, () => { o.cursor = i; overlayKey('Enter'); }, () => { o.cursor = i; });
@@ -1361,20 +1398,20 @@ function drawOverlay() {
   }
   if (o.type === 'magic') {
     const list = learned(), h = 22 + list.length * 14;
-    const x = 324, y = 222 - h;
-    panel(x, y, 150, h);
+    const { x, w } = L.cmd, y = L.cmd.y - 4 - h;
+    panel(x, y, w, h);
     txt('まほう', x + 10, y + 6, '#8f7bb8');
     list.forEach((sp, i) => {
       const yy = y + 18 + i * 14, ok = player.mp >= sp.mp;
       if (o.cursor === i) cursorArrow(x + 8, yy);
       txt(sp.name, x + 20, yy, ok ? (o.cursor === i ? '#ffffff' : '#cbb8f0') : '#5a4a7a');
-      txt(`MP ${sp.mp}`, x + 140, yy, ok ? '#6aa8ff' : '#3a4a6a', 8, 'right');
-      hit(x + 4, yy - 2, 142, 13, () => { o.cursor = i; overlayKey('Enter'); }, () => { o.cursor = i; });
+      txt(`MP ${sp.mp}`, x + w - 10, yy, ok ? '#6aa8ff' : '#3a4a6a', 8, 'right');
+      hit(x + 4, yy - 2, w - 8, 14, () => { o.cursor = i; overlayKey('Enter'); }, () => { o.cursor = i; });
     });
     return;
   }
   // どうぐ
-  const list = itemList(), x = 150, y = 34, w = 180, h = Math.max(70, 44 + list.length * 14);
+  const list = itemList(), x = CX - 90, y = 34, w = 180, h = Math.max(70, 44 + list.length * 14);
   panel(x, y, w, h);
   txt('どうぐ', x + 10, y + 7, '#8f7bb8');
   txt(mode === 'battle' ? '（つかうと 1ターン）' : 'Esc:とじる', x + w - 10, y + 7, '#6b56a0', 8, 'right');
@@ -1385,7 +1422,7 @@ function drawOverlay() {
     ctx.drawImage(ITEM_SPR[id], x + 18, yy);
     txt(ITEMS[id].name, x + 30, yy, o.cursor === i ? '#ffffff' : '#cbb8f0');
     txt(`×${player.items[id]}`, x + w - 12, yy, '#f2d27a', 8, 'right');
-    hit(x + 4, yy - 2, w - 8, 13, () => { o.cursor = i; overlayKey('Enter'); }, () => { o.cursor = i; });
+    hit(x + 4, yy - 2, w - 8, 14, () => { o.cursor = i; overlayKey('Enter'); }, () => { o.cursor = i; });
   });
   if (list.length) txt(ITEMS[list[Math.min(o.cursor, list.length - 1)]].desc, x + 12, y + h - 14, '#9be07a');
 }
@@ -1396,33 +1433,35 @@ function drawTitle() {
   drawMotes();
   drawVignette();
   ctx.fillStyle = 'rgba(7,4,12,.35)'; ctx.fillRect(0, 0, LW, LH);
-  const gy = 48 + Math.round(Math.sin(T / 800) * 2);
+  const ty = L.ty, gy = 48 + ty + Math.round(Math.sin(T / 800) * 2);
   ctx.save();
   ctx.shadowColor = '#9b6ae0'; ctx.shadowBlur = 12;
-  txt('紫晶の迷宮', 240, gy, '#f0e6ff', 30, 'center');
+  txt('紫晶の迷宮', CX, gy, '#f0e6ff', 30, 'center');
   ctx.restore();
-  txt('― AMETHYST LABYRINTH ―', 240, gy + 38, '#b89cff', 8, 'center');
-  isoFill(240, 158, 12, 3, 'rgba(0,0,0,.5)');
-  ctx.drawImage(heroFront[0][0], 222, 116 + (Math.sin(T / 450) > .6 ? -2 : 0), 36, 42);
+  txt('― AMETHYST LABYRINTH ―', CX, gy + 38, '#b89cff', 8, 'center');
+  isoFill(CX, 158 + ty, 12, 3, 'rgba(0,0,0,.5)');
+  ctx.drawImage(heroFront[0][0], CX - 18, 116 + ty + (Math.sin(T / 450) > .6 ? -2 : 0), 36, 42);
   const save = hasSave();
-  panel(176, 172, 128, 50);
+  panel(CX - 64, 172 + ty, 128, 50);
   ['はじめから', 'つづきから'].forEach((s, i) => {
-    const y = 184 + i * 16, on = i === 0 || save;
-    if (titleCursor === i) cursorArrow(196, y);
-    txt(s, 208, y, !on ? '#4f3f70' : titleCursor === i ? '#ffffff' : '#cbb8f0');
-    hit(180, y - 3, 120, 15, () => { titleCursor = i; titleSelect(i); }, () => { titleCursor = i; });
+    const y = 184 + ty + i * 16, on = i === 0 || save;
+    if (titleCursor === i) cursorArrow(CX - 44, y);
+    txt(s, CX - 32, y, !on ? '#4f3f70' : titleCursor === i ? '#ffffff' : '#cbb8f0');
+    hit(CX - 60, y - 4, 120, 17, () => { titleCursor = i; titleSelect(i); }, () => { titleCursor = i; });
   });
-  txt('やじるしキー：えらぶ   Enter / Z：けってい', 240, 290, '#8f7bb8', 8, 'center');
-  txt(save ? 'セーブデータ あり' : '', 240, 302, '#6b56a0', 8, 'center');
+  txt(PORTRAIT ? 'タップで けってい' : 'やじるしキー：えらぶ   Enter / Z：けってい', CX, 290 + ty * 1.3, '#8f7bb8', 8, 'center');
+  txt(save ? 'セーブデータ あり' : '', CX, 302 + ty * 1.3, '#6b56a0', 8, 'center');
 }
 function drawGameOver() {
+  const ty = L.ty;
   ctx.fillStyle = 'rgba(20,4,16,.78)'; ctx.fillRect(0, 0, LW, LH);
   ctx.save(); ctx.shadowColor = '#c02060'; ctx.shadowBlur = 10;
-  txt('GAME OVER', 240, 90, '#ffb0c8', 24, 'center');
+  txt('GAME OVER', CX, 90 + ty, '#ffb0c8', 24, 'center');
   ctx.restore();
-  txt(`B${depth}F で ${player.name}は ちからつきた…`, 240, 132, '#ecdfff', 8, 'center');
-  txt('でも だいじょうぶ。 さいごの セーブから やりなおせるよ。', 240, 150, '#cbb8f0', 8, 'center');
-  if (T - goT > 900 && Math.floor(T / 500) % 2) txt('Enter で タイトルへ', 240, 186, '#f2d27a', 8, 'center');
+  txt(`B${depth}F で ${player.name}は ちからつきた…`, CX, 132 + ty, '#ecdfff', 8, 'center');
+  txt('でも だいじょうぶ。', CX, 150 + ty, '#cbb8f0', 8, 'center');
+  txt('さいごの セーブから やりなおせるよ。', CX, 162 + ty, '#cbb8f0', 8, 'center');
+  if (T - goT > 900 && Math.floor(T / 500) % 2) txt(PORTRAIT ? 'タップで タイトルへ' : 'Enter で タイトルへ', CX, 196 + ty, '#f2d27a', 8, 'center');
 }
 
 // =====================================================================
@@ -1447,6 +1486,7 @@ function draw() {
     drawStatus();
     drawMessages();
     drawCommands();
+    if (L.pad) drawPad();
     if (overlay) drawOverlay();
     if (mode === 'gameover') drawGameOver();
   }
@@ -1471,7 +1511,7 @@ function draw() {
   if (lt < 1400) {
     ctx.globalAlpha = lt > 1000 ? 1 - (lt - 1000) / 400 : 1;
     ctx.save(); ctx.shadowColor = '#f2d27a'; ctx.shadowBlur = 8;
-    txt('LEVEL UP!', 240, 70 - Math.min(lt / 300, 1) * 10, '#fff6c0', 20, 'center');
+    txt('LEVEL UP!', CX, 70 - Math.min(lt / 300, 1) * 10, '#fff6c0', 20, 'center');
     ctx.restore(); ctx.globalAlpha = 1;
   }
   // フラッシュ
@@ -1486,6 +1526,37 @@ function loop(now) {
   draw();
   requestAnimationFrame(loop);
 }
+// ---------- レイアウト（横長＝PC / 縦長＝スマホ） ----------
+function setLayout(portrait) {
+  PORTRAIT = portrait;
+  if (portrait) {
+    LW = 240; LH = 426; S = 3;
+    L = { vh: 212, vw: 120, vhh: 106, ty: 60,
+      msg: { x: 4, y: 214, w: 232, h: 70, lines: 5 },
+      st: { x: 4, y: 288, w: 114, h: 88 }, cmd: { x: 122, y: 288, w: 114, h: 88 },
+      mini: { cs: 4, cells: 15 }, bw: { x: 8, y: 30, w: 224, h: 174 }, ex: 120, ey: 104,
+      hero: { x: 16, y: 154 }, pad: { y: 380, h: 42 } };
+  } else {
+    LW = 480; LH = 320; S = 2;
+    L = { vh: 224, vw: 240, vhh: 112, ty: 0,
+      msg: { x: 160, y: 226, w: 160, h: 88, lines: 6 },
+      st: { x: 6, y: 226, w: 150, h: 88 }, cmd: { x: 324, y: 226, w: 150, h: 88 },
+      mini: { cs: 4, cells: 21 }, bw: { x: 100, y: 16, w: 280, h: 196 }, ex: 240, ey: 100,
+      hero: { x: 116, y: 166 }, pad: null };
+  }
+  CX = LW / 2; EX = L.ex; EY = L.ey;
+  cv.width = LW * S; cv.height = LH * S;
+  cv.style.aspectRatio = `${LW} / ${LH}`;
+  cv.style.width = portrait ? `min(100vw, calc(100dvh * ${LW / LH}))` : '';
+  document.body.classList.toggle('portrait', portrait);
+  allocView(L.vw, L.vhh);
+  vignette = null;
+  for (const m of motes) { m.x = Math.random() * LW; m.y = Math.random() * L.vh; }
+}
+const wantPortrait = () => innerHeight > innerWidth;
+setLayout(wantPortrait());
+addEventListener('resize', () => { if (wantPortrait() !== PORTRAIT) setLayout(wantPortrait()); });
+
 titleCursor = hasSave() ? 1 : 0;
 cv.focus();
 requestAnimationFrame(loop);
